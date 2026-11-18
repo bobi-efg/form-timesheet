@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Form Timesheet</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    :root {
+      --bg: #f4f6f8; --card: #ffffff; --text: #1f2933; --muted: #616e7c;
+      --border: #d2d8de; --accent: #2563eb; --accent-hover: #1d4ed8;
+      --ok: #15803d; --err: #b91c1c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111827; --card: #1f2937; --text: #f3f4f6; --muted: #9ca3af;
+        --border: #374151; --accent: #3b82f6; --accent-hover: #60a5fa;
+        --ok: #4ade80; --err: #f87171;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 32px 16px; background: var(--bg); color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.5;
+    }
+    .card {
+      max-width: 560px; margin: 0 auto; background: var(--card);
+      border: 1px solid var(--border); border-radius: 12px; padding: 28px;
+    }
+    h1 { margin: 0 0 4px; font-size: 1.5rem; }
+    p.sub { margin: 0 0 24px; color: var(--muted); }
+    label { display: block; font-weight: 600; font-size: .9rem; margin-bottom: 6px; }
+    .field { margin-bottom: 18px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    input, textarea {
+      width: 100%; padding: 10px 12px; font: inherit; color: var(--text);
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    }
+    input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    textarea { min-height: 100px; resize: vertical; }
+    .total { color: var(--muted); font-size: .9rem; margin: -6px 0 18px; }
+    button.primary {
+      width: 100%; padding: 12px; font: inherit; font-weight: 600; color: #fff;
+      background: var(--accent); border: 0; border-radius: 8px; cursor: pointer;
+    }
+    button.primary:hover { background: var(--accent-hover); }
+    button.primary:disabled { opacity: .6; cursor: wait; }
+    .msg { margin-top: 14px; font-weight: 600; text-align: center; min-height: 1.5em; }
+    .msg.ok { color: var(--ok); } .msg.err { color: var(--err); }
+
+    #loginBox { text-align: center; }
+    #gsiButton { display: flex; justify-content: center; margin-top: 8px; }
+    .userbar {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 10px 12px; margin-bottom: 20px; border: 1px solid var(--border);
+      border-radius: 8px; background: var(--bg); font-size: .9rem;
+    }
+    .userbar span { overflow-wrap: anywhere; }
+    .link-btn {
+      background: none; border: 0; padding: 0; font: inherit; color: var(--accent);
+      cursor: pointer; text-decoration: underline; flex-shrink: 0;
+    }
+    [hidden] { display: none !important; }
+    @media (max-width: 480px) { .row { grid-template-columns: 1fr; } .card { padding: 20px; } }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Form Timesheet</h1>
+    <p class="sub">Isi jam kerja harian kamu. Data otomatis tersimpan ke Google Sheet.</p>
+
+    <!-- Tampil sebelum login -->
+    <div id="loginBox">
+      <p>Silakan masuk dengan akun Google untuk mengisi timesheet.</p>
+      <div id="gsiButton"></div>
+      <div class="msg" id="loginMsg" role="status"></div>
+    </div>
+
+    <!-- Tampil setelah login -->
+    <form id="form" hidden>
+      <div class="userbar">
+        <span>Masuk sebagai <strong id="userEmail"></strong></span>
+        <button type="button" class="link-btn" id="logoutBtn">Keluar</button>
+      </div>
+
+      <div class="field">
+        <label for="nama">Nama</label>
+        <input id="nama" name="nama" required>
+      </div>
+      <div class="field">
+        <label for="tanggal">Tanggal</label>
+        <input id="tanggal" name="tanggal" type="date" required>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label for="jamMulai">Jam Mulai</label>
+          <input id="jamMulai" name="jamMulai" type="time" required>
+        </div>
+        <div class="field">
+          <label for="jamSelesai">Jam Selesai</label>
+          <input id="jamSelesai" name="jamSelesai" type="time" required>
+        </div>
+      </div>
+      <div class="total">Total jam: <strong id="totalText">-</strong></div>
+      <div class="field">
+        <label for="proyek">Proyek / Klien</label>
+        <input id="proyek" name="proyek" required>
+      </div>
+      <div class="field">
+        <label for="deskripsi">Deskripsi Pekerjaan</label>
+        <textarea id="deskripsi" name="deskripsi" required></textarea>
+      </div>
+
+      <button type="submit" class="primary" id="btn">Kirim</button>
+      <div class="msg" id="msg" role="status"></div>
+    </form>
+  </div>
+
+  <script>
+    // ===== KONFIGURASI =====
+    // URL Web App dari Apps Script (Deploy > Manage deployments)
+    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzJFVPKVgVXLolNngGGNGcNRqCv00NpHRE2r5ITOl9tztDMyEh0fkq_XpLlclGieNjV/exec';
+    // Client ID OAuth (Google Cloud > APIs & Services > Credentials). HARUS sama dengan CLIENT_ID di Code.gs
+    const CLIENT_ID = 'PASTE_CLIENT_ID_DI_SINI.apps.googleusercontent.com';
+    // =======================
+
+    const form = document.getElementById('form');
+    const loginBox = document.getElementById('loginBox');
+    const loginMsg = document.getElementById('loginMsg');
+    const btn = document.getElementById('btn');
+    const msg = document.getElementById('msg');
+    const totalText = document.getElementById('totalText');
+    const TOKEN_KEY = 'timesheet_id_token';
+
+    let idToken = null;
+
+    // ---------- Login Google ----------
+    function decodeJwt(token) {
+      const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      const bin = atob(b64);
+      const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+      return JSON.parse(new TextDecoder().decode(bytes));
+    }
+
+    function tokenMasihBerlaku(token) {
+      try { return decodeJwt(token).exp * 1000 > Date.now() + 60 * 1000; }
+      catch { return false; }
+    }
+
+    function setSession(token) {
+      idToken = token;
+      try { sessionStorage.setItem(TOKEN_KEY, token); } catch {}
+      const info = decodeJwt(token);
+      document.getElementById('userEmail').textContent = info.email;
+      if (!form.nama.value) form.nama.value = info.name || '';
+      loginBox.hidden = true;
+      form.hidden = false;
+    }
+
+    function clearSession(pesan) {
+      idToken = null;
+      try { sessionStorage.removeItem(TOKEN_KEY); } catch {}
+      form.hidden = true;
+      loginBox.hidden = false;
+      loginMsg.className = pesan ? 'msg err' : 'msg';
+      loginMsg.textContent = pesan || '';
+    }
+
+    function handleCredential(response) {
+      loginMsg.textContent = '';
+      setSession(response.credential);
+    }
+
+    window.addEventListener('load', () => {
+      if (!window.google || !google.accounts) {
+        loginMsg.className = 'msg err';
+        loginMsg.textContent = 'Gagal memuat Google Sign-In. Cek koneksi internet lalu muat ulang halaman.';
+        return;
+      }
+      google.accounts.id.initialize({
+        client_id: CLIENT_ID,
+        callback: handleCredential,
+        auto_select: true
+      });
+      google.accounts.id.renderButton(document.getElementById('gsiButton'), {
+        theme: 'outline', size: 'large', text: 'signin_with', shape: 'pill'
+      });
+
+      let saved = null;
+      try { saved = sessionStorage.getItem(TOKEN_KEY); } catch {}
+      if (saved && tokenMasihBerlaku(saved)) setSession(saved);
+      else google.accounts.id.prompt();
+    });
+
+    document.getElementById('logoutBtn').addEventListener('click', () => {
+      if (window.google && google.accounts) google.accounts.id.disableAutoSelect();
+      form.nama.value = '';
+      clearSession();
+    });
+
+    // ---------- Form ----------
+    document.getElementById('tanggal').valueAsDate = new Date();
+
+    function hitungTotal() {
+      const a = form.jamMulai.value, b = form.jamSelesai.value;
+      if (!a || !b) { totalText.textContent = '-'; return ''; }
+      const [h1, m1] = a.split(':').map(Number);
+      const [h2, m2] = b.split(':').map(Number);
+      let menit = (h2 * 60 + m2) - (h1 * 60 + m1);
+      if (menit < 0) menit += 24 * 60; // shift lewat tengah malam
+      const jam = (menit / 60).toFixed(2);
+      totalText.textContent = jam + ' jam';
+      return jam;
+    }
+    form.jamMulai.addEventListener('input', hitungTotal);
+    form.jamSelesai.addEventListener('input', hitungTotal);
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      msg.className = 'msg'; msg.textContent = '';
+
+      // Token Google berlaku ±1 jam; minta login ulang kalau sudah habis.
+      if (!idToken || !tokenMasihBerlaku(idToken)) {
+        clearSession('Sesi login sudah habis. Silakan masuk lagi, isian kamu tidak hilang.');
+        google.accounts.id.prompt();
+        return;
+      }
+
+      btn.disabled = true; btn.textContent = 'Mengirim...';
+      const data = new URLSearchParams(new FormData(form));
+      data.append('totalJam', hitungTotal());
+      data.append('idToken', idToken);
+
+      try {
+        const res = await fetch(SCRIPT_URL, { method: 'POST', body: data });
+        const json = await res.json();
+        if (json.status === 'unauthorized') {
+          clearSession('Login tidak valid: ' + (json.message || '') + '. Silakan masuk lagi.');
+          return;
+        }
+        if (json.status !== 'success') throw new Error(json.message || 'Gagal menyimpan');
+        msg.className = 'msg ok'; msg.textContent = 'Berhasil! Data tersimpan.';
+        const nama = form.nama.value;
+        form.reset();
+        form.nama.value = nama; // biar gak ngetik ulang
+        document.getElementById('tanggal').valueAsDate = new Date();
+        hitungTotal();
+      } catch (err) {
+        msg.className = 'msg err'; msg.textContent = 'Gagal mengirim: ' + err.message;
+      } finally {
+        btn.disabled = false; btn.textContent = 'Kirim';
+      }
+    });
+  </script>
+</body>
+</html>
